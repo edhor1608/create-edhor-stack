@@ -75,6 +75,10 @@ async function copyTemplate(
   for (const entry of entries) {
     const srcPath = path.join(srcDir, entry.name);
     let destName = entry.name.replace(/\.hbs$/, "");
+    // Rename gitignore to .gitignore (npm excludes .gitignore files from packages)
+    if (destName === "gitignore") {
+      destName = ".gitignore";
+    }
     const destPath = path.join(destDir, destName);
 
     if (entry.isDirectory()) {
