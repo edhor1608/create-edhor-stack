@@ -5,4 +5,6 @@ export interface ProjectConfig {
   backend: "none" | "convex" | "drizzle";
   testing: boolean;
   ci: boolean;
+  uiStyle?: "new-york" | "default";
+  uiBaseColor?: "zinc" | "slate" | "stone" | "neutral" | "gray";
 }

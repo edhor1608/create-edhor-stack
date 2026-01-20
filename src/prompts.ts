@@ -51,6 +51,33 @@ export async function runPrompts(projectName?: string): Promise<ProjectConfig | 
           required: false,
         }),
 
+      uiStyle: ({ results }) =>
+        (results.packages as string[] | undefined)?.includes("ui")
+          ? p.select({
+              message: "UI style?",
+              options: [
+                { value: "new-york", label: "New York", hint: "recommended" },
+                { value: "default", label: "Default" },
+              ],
+              initialValue: "new-york",
+            })
+          : Promise.resolve(undefined),
+
+      uiBaseColor: ({ results }) =>
+        (results.packages as string[] | undefined)?.includes("ui")
+          ? p.select({
+              message: "Base color?",
+              options: [
+                { value: "zinc", label: "Zinc", hint: "neutral" },
+                { value: "slate", label: "Slate", hint: "cool" },
+                { value: "stone", label: "Stone", hint: "warm" },
+                { value: "neutral", label: "Neutral" },
+                { value: "gray", label: "Gray" },
+              ],
+              initialValue: "zinc",
+            })
+          : Promise.resolve(undefined),
+
       testing: () =>
         p.confirm({
           message: "Add testing setup? (Vitest + Playwright)",

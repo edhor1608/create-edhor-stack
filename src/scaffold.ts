@@ -1,5 +1,6 @@
 import fs from "fs-extra";
 import path from "node:path";
+import { execa } from "execa";
 import type { ProjectConfig } from "./types.js";
 import { getTemplatesDir, renderTemplate } from "./utils.js";
 
@@ -26,6 +27,28 @@ export async function scaffoldProject(config: ProjectConfig, targetDir: string):
     if (await fs.pathExists(appSrc)) {
       await copyTemplate(appSrc, appDest, { name: config.name });
     }
+  }
+
+  // Copy selected packages
+  for (const pkg of config.packages) {
+    const pkgSrc = path.join(templatesDir, "packages", pkg);
+    const pkgDest = path.join(targetDir, "packages", pkg);
+
+    if (await fs.pathExists(pkgSrc)) {
+      await copyTemplate(pkgSrc, pkgDest, { name: config.name });
+    }
+  }
+
+  // Initialize shadcn for UI package
+  if (config.packages.includes("ui") && config.uiStyle && config.uiBaseColor) {
+    const uiPath = path.join(targetDir, "packages", "ui");
+    await execa("bunx", [
+      "shadcn@latest", "init",
+      "--style", config.uiStyle,
+      "--base-color", config.uiBaseColor,
+      "--yes",
+      "--cwd", uiPath
+    ], { stdio: "inherit" });
   }
 
   // Make husky pre-commit executable
