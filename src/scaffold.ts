@@ -42,13 +42,19 @@ export async function scaffoldProject(config: ProjectConfig, targetDir: string):
   // Initialize shadcn for UI package
   if (config.packages.includes("ui") && config.uiStyle && config.uiBaseColor) {
     const uiPath = path.join(targetDir, "packages", "ui");
-    await execa("bunx", [
-      "shadcn@latest", "init",
-      "--style", config.uiStyle,
-      "--base-color", config.uiBaseColor,
-      "--yes",
-      "--cwd", uiPath
-    ], { stdio: "inherit" });
+    try {
+      await execa("bunx", [
+        "shadcn@latest", "init",
+        "--style", config.uiStyle,
+        "--base-color", config.uiBaseColor,
+        "--yes",
+        "--cwd", uiPath
+      ], { stdio: "inherit" });
+    } catch (error) {
+      console.warn("\nWarning: Failed to initialize shadcn. You can run it manually:");
+      console.warn(`  cd ${path.relative(process.cwd(), uiPath)}`);
+      console.warn(`  bunx shadcn@latest init --style ${config.uiStyle} --base-color ${config.uiBaseColor}\n`);
+    }
   }
 
   // Make husky pre-commit executable
