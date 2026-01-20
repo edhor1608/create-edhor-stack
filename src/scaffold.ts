@@ -18,6 +18,16 @@ export async function scaffoldProject(config: ProjectConfig, targetDir: string):
   await fs.ensureDir(path.join(targetDir, "apps"));
   await fs.ensureDir(path.join(targetDir, "packages"));
 
+  // Copy selected apps
+  for (const app of config.apps) {
+    const appSrc = path.join(templatesDir, "apps", app);
+    const appDest = path.join(targetDir, "apps", app);
+
+    if (await fs.pathExists(appSrc)) {
+      await copyTemplate(appSrc, appDest, { name: config.name });
+    }
+  }
+
   // Make husky pre-commit executable
   const preCommitPath = path.join(targetDir, ".husky", "pre-commit");
   if (await fs.pathExists(preCommitPath)) {
@@ -30,6 +40,7 @@ async function copyTemplate(
   destDir: string,
   vars: Record<string, string>
 ): Promise<void> {
+  await fs.ensureDir(destDir);
   const entries = await fs.readdir(srcDir, { withFileTypes: true });
 
   for (const entry of entries) {
@@ -44,7 +55,7 @@ async function copyTemplate(
       let content = await fs.readFile(srcPath, "utf-8");
 
       // Render handlebars-style variables
-      if (entry.name.endsWith(".hbs") || entry.name.endsWith(".json")) {
+      if (entry.name.endsWith(".hbs") || entry.name.endsWith(".json") || entry.name.endsWith(".tsx")) {
         content = renderTemplate(content, vars);
       }
 
