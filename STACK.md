@@ -1,21 +1,19 @@
 # STACK.md - Edhor Stack Best Practices
 
-> This document serves as context for AI assistants and developers working on projects scaffolded with create-edhor-stack. It captures patterns derived from production applications.
+> This document captures the actual patterns used in Edhor production applications. It serves as context for AI assistants and developers working on projects scaffolded with create-edhor-stack.
 
 ---
 
 ## Table of Contents
 
 1. [Core Stack](#core-stack)
-2. [Framework Choices](#framework-choices)
-3. [Styling Patterns](#styling-patterns)
-4. [State Management](#state-management)
+2. [Expo Mobile Patterns](#expo-mobile-patterns)
+3. [TanStack Start Web Patterns](#tanstack-start-web-patterns)
+4. [Styling Patterns](#styling-patterns)
 5. [Database Options](#database-options)
 6. [Authentication](#authentication)
-7. [Testing Strategies](#testing-strategies)
-8. [Deployment Patterns](#deployment-patterns)
-9. [Code Organization](#code-organization)
-10. [UI/Accessibility Guidelines](#uiaccessibility-guidelines)
+7. [Code Organization](#code-organization)
+8. [UI/Accessibility Guidelines](#uiaccessibility-guidelines)
 
 ---
 
@@ -27,80 +25,624 @@
 |------|---------|---------|
 | Bun | Package manager & runtime | 1.3+ |
 | Turborepo | Monorepo build orchestration | 2.5+ |
-| TypeScript | Type safety | 5.8+ |
+| TypeScript | Type safety (strict mode) | 5.8+ |
 | Biome | Linting & formatting (replaces ESLint/Prettier) | 2.3+ |
 | Husky | Git hooks | 9.1+ |
+| TanStack Query | Server state management | 5.x |
 
-### Why Bun?
+### Biome Configuration
 
-- Faster package installation than npm/pnpm
-- Native TypeScript execution (no build step for dev)
-- Built-in test runner compatible with Vitest API
-- Workspace support for monorepos
-
-### Why Turborepo?
-
-- Intelligent caching reduces CI time by 70-90%
-- Parallel task execution
-- Remote caching for team workflows
-- Simple configuration
+```json
+{
+  "linter": {
+    "rules": {
+      "correctness": {
+        "noUnusedImports": "error",
+        "noUnusedVariables": "warn",
+        "useHookAtTopLevel": "error"
+      },
+      "style": {
+        "useImportType": "error"
+      }
+    }
+  },
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "trailingCommas": "es5",
+      "semicolons": "always"
+    }
+  }
+}
+```
 
 ---
 
-## Framework Choices
+## Expo Mobile Patterns
 
-### Web: TanStack Start
+### State Management: Zustand with Persistence
 
-**Use for:** All web applications requiring SSR, file-based routing, or SEO.
+**Multiple specialized stores, not one giant store:**
 
 ```typescript
-// app.config.ts
-import { defineConfig } from "@tanstack/start/config";
-import viteTsConfigPaths from "vite-tsconfig-paths";
+// lib/store.ts
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 
-export default defineConfig({
-  vite: {
-    plugins: [viteTsConfigPaths()],
+// App settings store
+interface AppState {
+  fontSize: 'small' | 'medium' | 'large';
+  theme: 'light' | 'dark' | 'system';
+  setFontSize: (size: AppState['fontSize']) => void;
+  setTheme: (theme: AppState['theme']) => void;
+}
+
+export const useAppStore = create<AppState>()(
+  persist(
+    (set) => ({
+      fontSize: 'medium',
+      theme: 'system',
+      setFontSize: (fontSize) => set({ fontSize }),
+      setTheme: (theme) => set({ theme }),
+    }),
+    {
+      name: 'app-storage',
+      storage: createJSONStorage(() => AsyncStorage),
+    }
+  )
+);
+
+// Search store (separate concern)
+interface SearchState {
+  query: string;
+  recentSearches: string[];
+  setQuery: (query: string) => void;
+  addRecentSearch: (search: string) => void;
+}
+
+export const useSearchStore = create<SearchState>()(
+  persist(
+    (set) => ({
+      query: '',
+      recentSearches: [],
+      setQuery: (query) => set({ query }),
+      addRecentSearch: (search) =>
+        set((state) => ({
+          recentSearches: [search, ...state.recentSearches.filter((s) => s !== search)].slice(0, 10),
+        })),
+    }),
+    {
+      name: 'search-storage',
+      storage: createJSONStorage(() => AsyncStorage),
+    }
+  )
+);
+```
+
+**Always use selectors to prevent re-renders:**
+
+```typescript
+// Good - only re-renders when fontSize changes
+const fontSize = useAppStore((state) => state.fontSize);
+
+// Bad - re-renders on ANY store change
+const { fontSize } = useAppStore();
+```
+
+### API Layer: Zod Validation with fetchValidated
+
+**Every API call validates responses with Zod:**
+
+```typescript
+// api/client.ts
+import { z } from 'zod';
+
+export async function fetchValidated<T>(
+  url: string,
+  schema: z.ZodType<T>,
+  options?: RequestInit
+): Promise<T> {
+  const response = await fetch(url, options);
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return schema.parse(data);
+}
+
+// api/schemas.ts
+export const ArticleSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  content: z.string(),
+  publishedAt: z.string().datetime(),
+  author: z.object({
+    name: z.string(),
+    avatar: z.string().url().optional(),
+  }),
+});
+
+export const ArticlesResponseSchema = z.object({
+  articles: z.array(ArticleSchema),
+  nextCursor: z.string().nullable(),
+});
+
+export type Article = z.infer<typeof ArticleSchema>;
+
+// api/queries.ts
+import { queryOptions } from '@tanstack/react-query';
+
+export const articlesQueryOptions = (cursor?: string) =>
+  queryOptions({
+    queryKey: ['articles', { cursor }],
+    queryFn: () =>
+      fetchValidated(
+        `https://api.example.com/articles?cursor=${cursor ?? ''}`,
+        ArticlesResponseSchema
+      ),
+  });
+```
+
+### TanStack Query: Offline-First Configuration
+
+```typescript
+// lib/query-client.ts
+import { QueryClient } from '@tanstack/react-query';
+import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Keep cached data for 7 days (offline support)
+      gcTime: 1000 * 60 * 60 * 24 * 7,
+      // Data considered fresh for 5 minutes
+      staleTime: 1000 * 60 * 5,
+      // Try cache first, then network
+      networkMode: 'offlineFirst',
+      // Retry with exponential backoff
+      retry: 3,
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+    },
+    mutations: {
+      networkMode: 'offlineFirst',
+    },
+  },
+});
+
+// Persist to AsyncStorage for true offline support
+export const persister = createAsyncStoragePersister({
+  storage: AsyncStorage,
+  key: 'REACT_QUERY_OFFLINE_CACHE',
+});
+```
+
+**App entry with persistence:**
+
+```typescript
+// app/_layout.tsx
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
+import { queryClient, persister } from '@/lib/query-client';
+
+export default function RootLayout() {
+  return (
+    <PersistQueryClientProvider client={queryClient} persistOptions={{ persister }}>
+      <Stack />
+    </PersistQueryClientProvider>
+  );
+}
+```
+
+### Error Handling: Result Pattern
+
+**Explicit error handling without try-catch everywhere:**
+
+```typescript
+// lib/result.ts
+export type Result<T, E = Error> =
+  | { ok: true; value: T }
+  | { ok: false; error: E };
+
+export const ok = <T>(value: T): Result<T, never> => ({ ok: true, value });
+export const err = <E>(error: E): Result<never, E> => ({ ok: false, error });
+
+// Usage in API calls
+export async function fetchArticle(id: string): Promise<Result<Article, string>> {
+  try {
+    const article = await fetchValidated(`/api/articles/${id}`, ArticleSchema);
+    return ok(article);
+  } catch (e) {
+    if (e instanceof z.ZodError) {
+      return err('Invalid response format');
+    }
+    return err(e instanceof Error ? e.message : 'Unknown error');
+  }
+}
+
+// Usage in component
+const result = await fetchArticle(id);
+if (!result.ok) {
+  showToast(result.error);
+  return;
+}
+const article = result.value;
+```
+
+### Custom Hooks
+
+```typescript
+// hooks/useNetworkStatus.ts
+import NetInfo from '@react-native-community/netinfo';
+import { useEffect, useState } from 'react';
+
+export function useNetworkStatus() {
+  const [isConnected, setIsConnected] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    return NetInfo.addEventListener((state) => {
+      setIsConnected(state.isConnected);
+    });
+  }, []);
+
+  return isConnected;
+}
+
+// hooks/useDebouncedState.ts
+import { useState, useEffect } from 'react';
+
+export function useDebouncedState<T>(initialValue: T, delay: number = 300) {
+  const [value, setValue] = useState(initialValue);
+  const [debouncedValue, setDebouncedValue] = useState(initialValue);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+
+  return [debouncedValue, setValue, value] as const;
+}
+```
+
+### Virtualized Lists: FlashList
+
+```typescript
+import { FlashList } from '@shopify/flash-list';
+
+function ArticleList({ articles }: { articles: Article[] }) {
+  return (
+    <FlashList
+      data={articles}
+      renderItem={({ item }) => <ArticleCard article={item} />}
+      estimatedItemSize={120}
+      keyExtractor={(item) => item.id}
+    />
+  );
+}
+```
+
+### Navigation: Expo Router
+
+```typescript
+// app/(tabs)/_layout.tsx
+import { Tabs } from 'expo-router';
+import { Home, Search, Settings } from 'lucide-react-native';
+
+export default function TabLayout() {
+  return (
+    <Tabs screenOptions={{ headerShown: false }}>
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: 'Home',
+          tabBarIcon: ({ color, size }) => <Home color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="search"
+        options={{
+          title: 'Search',
+          tabBarIcon: ({ color, size }) => <Search color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: 'Settings',
+          tabBarIcon: ({ color, size }) => <Settings color={color} size={size} />,
+        }}
+      />
+    </Tabs>
+  );
+}
+
+// app/article/[slug].tsx - Dynamic route
+import { useLocalSearchParams } from 'expo-router';
+
+export default function ArticleScreen() {
+  const { slug } = useLocalSearchParams<{ slug: string }>();
+  const { data: article } = useQuery(articleQueryOptions(slug));
+  // ...
+}
+```
+
+---
+
+## TanStack Start Web Patterns
+
+### Data Fetching: TanStack Query
+
+**Query options factories for consistency:**
+
+```typescript
+// lib/queries.ts
+import { queryOptions } from '@tanstack/react-query';
+
+export const projectsQueryOptions = queryOptions({
+  queryKey: ['projects'],
+  queryFn: async () => {
+    const response = await fetch('/api/projects');
+    return response.json();
+  },
+  staleTime: 1000 * 60 * 5,
+});
+
+export const projectQueryOptions = (id: string) =>
+  queryOptions({
+    queryKey: ['projects', id],
+    queryFn: async () => {
+      const response = await fetch(`/api/projects/${id}`);
+      return response.json();
+    },
+  });
+```
+
+**Route loaders with React Query:**
+
+```typescript
+// routes/projects.tsx
+import { createFileRoute } from '@tanstack/react-router';
+import { projectsQueryOptions } from '@/lib/queries';
+
+export const Route = createFileRoute('/projects')({
+  loader: ({ context }) => context.queryClient.ensureQueryData(projectsQueryOptions),
+  component: ProjectsPage,
+});
+
+function ProjectsPage() {
+  const { data: projects } = useSuspenseQuery(projectsQueryOptions);
+  return <ProjectList projects={projects} />;
+}
+```
+
+### Real-time Data: Convex
+
+```typescript
+// convex/messages.ts
+import { query, mutation } from './_generated/server';
+import { v } from 'convex/values';
+
+export const list = query({
+  args: { channelId: v.id('channels') },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query('messages')
+      .withIndex('by_channel', (q) => q.eq('channelId', args.channelId))
+      .order('desc')
+      .take(50);
+  },
+});
+
+export const send = mutation({
+  args: {
+    channelId: v.id('channels'),
+    content: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error('Unauthorized');
+
+    return await ctx.db.insert('messages', {
+      channelId: args.channelId,
+      content: args.content,
+      authorId: identity.subject,
+      createdAt: Date.now(),
+    });
   },
 });
 ```
 
-**Key patterns:**
-
-- File-based routing in `src/routes/`
-- `__root.tsx` for layout and providers
-- Route loaders for data fetching
-- Server functions for API-like operations
-
-**When NOT to use:**
-
-- Static sites (use Astro)
-- Simple SPAs without SSR needs (use Vite + React Router)
-
-### Mobile: Expo + React Native
-
-**Use for:** iOS and Android applications with shared React Native codebase.
-
 ```typescript
-// App entry with Expo Router
-import { Stack } from "expo-router";
+// Component usage
+import { useQuery, useMutation } from 'convex/react';
+import { api } from '@/convex/_generated/api';
 
-export default function Layout() {
-  return <Stack />;
+function Chat({ channelId }: { channelId: Id<'channels'> }) {
+  const messages = useQuery(api.messages.list, { channelId });
+  const sendMessage = useMutation(api.messages.send);
+
+  // messages automatically updates when database changes
 }
 ```
 
-**Key patterns:**
+### Tables: TanStack Table
 
-- Expo Router for file-based navigation
-- Expo modules over bare React Native packages
-- EAS Build for CI/CD
-- `expo-dev-client` for custom native modules
+```typescript
+// components/data-table.tsx
+import {
+  useReactTable,
+  getCoreRowModel,
+  getSortedRowModel,
+  getFilteredRowModel,
+  getPaginationRowModel,
+  flexRender,
+  type ColumnDef,
+  type SortingState,
+  type ColumnFiltersState,
+} from '@tanstack/react-table';
 
-**When NOT to use:**
+interface DataTableProps<T> {
+  data: T[];
+  columns: ColumnDef<T>[];
+}
 
-- Heavy native customization (consider bare React Native)
-- Web-only applications
+export function DataTable<T>({ data, columns }: DataTableProps<T>) {
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+
+  const table = useReactTable({
+    data,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    onSortingChange: setSorting,
+    onColumnFiltersChange: setColumnFilters,
+    state: { sorting, columnFilters },
+  });
+
+  return (
+    <div>
+      {/* Filter input */}
+      <input
+        placeholder="Filter..."
+        value={(table.getColumn('name')?.getFilterValue() as string) ?? ''}
+        onChange={(e) => table.getColumn('name')?.setFilterValue(e.target.value)}
+      />
+
+      {/* Table */}
+      <table>
+        <thead>
+          {table.getHeaderGroups().map((headerGroup) => (
+            <tr key={headerGroup.id}>
+              {headerGroup.headers.map((header) => (
+                <th key={header.id} onClick={header.column.getToggleSortingHandler()}>
+                  {flexRender(header.column.columnDef.header, header.getContext())}
+                  {{ asc: ' ↑', desc: ' ↓' }[header.column.getIsSorted() as string] ?? null}
+                </th>
+              ))}
+            </tr>
+          ))}
+        </thead>
+        <tbody>
+          {table.getRowModel().rows.map((row) => (
+            <tr key={row.id}>
+              {row.getVisibleCells().map((cell) => (
+                <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Pagination */}
+      <div>
+        <button onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>
+          Previous
+        </button>
+        <span>
+          Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()}
+        </span>
+        <button onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+### Forms: Plain useState
+
+**No form libraries - just controlled inputs:**
+
+```typescript
+function CreateProjectForm({ onSuccess }: { onSuccess: () => void }) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const validate = () => {
+    const newErrors: Record<string, string> = {};
+    if (!name.trim()) newErrors.name = 'Name is required';
+    if (name.length < 3) newErrors.name = 'Name must be at least 3 characters';
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validate()) return;
+
+    setIsSubmitting(true);
+    try {
+      await createProject({ name: name.trim(), description: description.trim() });
+      onSuccess();
+    } catch (error) {
+      setErrors({ form: 'Failed to create project' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <div>
+        <label htmlFor="name">Name</label>
+        <input
+          id="name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          aria-invalid={!!errors.name}
+        />
+        {errors.name && <span className="text-red-500">{errors.name}</span>}
+      </div>
+
+      <div>
+        <label htmlFor="description">Description</label>
+        <textarea
+          id="description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+      </div>
+
+      {errors.form && <div className="text-red-500">{errors.form}</div>}
+
+      <button type="submit" disabled={isSubmitting}>
+        {isSubmitting ? 'Creating...' : 'Create Project'}
+      </button>
+    </form>
+  );
+}
+```
+
+### Server Functions
+
+```typescript
+// routes/api/projects.ts
+import { createServerFn } from '@tanstack/start';
+import { db } from '@/lib/db';
+import { projects } from '@/lib/schema';
+
+export const getProjects = createServerFn('GET', async () => {
+  return await db.select().from(projects);
+});
+
+export const createProject = createServerFn('POST', async (data: { name: string; description?: string }) => {
+  const [project] = await db.insert(projects).values(data).returning();
+  return project;
+});
+```
 
 ---
 
@@ -108,10 +650,8 @@ export default function Layout() {
 
 ### Tailwind CSS v4
 
-**Configuration (v4 style):**
-
 ```css
-/* styles.css */
+/* app.css */
 @import "tailwindcss";
 
 @theme {
@@ -121,282 +661,133 @@ export default function Layout() {
 }
 ```
 
-**Best practices:**
-
-1. Use CSS variables for theming via `@theme`
-2. Prefer `oklch()` for perceptually uniform colors
-3. Keep utility classes; extract components for repeated patterns
-4. Use `cn()` helper for conditional classes
+### shadcn/ui with cn() Helper
 
 ```typescript
 // lib/utils.ts
-import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 ```
 
-### shadcn/ui
-
-**Installation pattern:**
-
-```bash
-bunx shadcn@latest init
-bunx shadcn@latest add button card dialog
-```
-
-**Usage guidelines:**
-
-1. Components live in `packages/ui/src/components/`
-2. Copy-paste model allows full customization
-3. Always use the `cn()` utility for class merging
-4. Prefer composition over configuration
+### Icons: Lucide
 
 ```tsx
-// Composable pattern
-<Card>
-  <CardHeader>
-    <CardTitle>Title</CardTitle>
-  </CardHeader>
-  <CardContent>Content</CardContent>
-</Card>
-```
+import { Search, Menu, X, ChevronRight } from 'lucide-react';
 
-### Icons: Lucide React
-
-```tsx
-import { Search, Menu, X } from "lucide-react";
-
-// Consistent sizing
+// Consistent sizing with size-* utility
 <Search className="size-4" />
 <Menu className="size-5" />
+
+// React Native
+import { Search, Menu } from 'lucide-react-native';
+<Search color={colors.gray[500]} size={20} />
 ```
-
-**Guidelines:**
-
-- Use `size-*` for width and height together
-- Prefer stroke icons for UI, filled for emphasis
-- Import individual icons, not the entire package
-
----
-
-## State Management
-
-### Decision Matrix
-
-| Scenario | Solution |
-|----------|----------|
-| Server state (REST/GraphQL) | TanStack React Query |
-| Real-time data | Convex `useQuery` |
-| Global UI state | Zustand |
-| Form state | React Hook Form + Zod |
-| URL state | TanStack Router search params |
-| Local component state | `useState` / `useReducer` |
-
-### TanStack React Query
-
-**For traditional REST/GraphQL APIs:**
-
-```typescript
-// queries/users.ts
-import { queryOptions } from "@tanstack/react-query";
-
-export const usersQueryOptions = queryOptions({
-  queryKey: ["users"],
-  queryFn: () => fetch("/api/users").then((r) => r.json()),
-  staleTime: 5 * 60 * 1000, // 5 minutes
-});
-
-// Usage in component
-const { data, isLoading } = useQuery(usersQueryOptions);
-```
-
-**Best practices:**
-
-1. Define query options in separate files
-2. Use `queryKey` factories for consistency
-3. Set appropriate `staleTime` (default is 0)
-4. Use `useMutation` for write operations with `onSuccess` invalidation
-
-### Convex Real-time
-
-**For real-time features:**
-
-```typescript
-// convex/messages.ts
-import { query } from "./_generated/server";
-
-export const list = query({
-  handler: async (ctx) => {
-    return await ctx.db.query("messages").order("desc").take(50);
-  },
-});
-
-// Component
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api";
-
-function Messages() {
-  const messages = useQuery(api.messages.list);
-  // Automatically re-renders on database changes
-}
-```
-
-### Zustand (Global UI State)
-
-```typescript
-// stores/ui.ts
-import { create } from "zustand";
-
-interface UIState {
-  sidebarOpen: boolean;
-  toggleSidebar: () => void;
-}
-
-export const useUIStore = create<UIState>((set) => ({
-  sidebarOpen: false,
-  toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
-}));
-```
-
-**Use Zustand for:**
-
-- Modal/dialog open states
-- Sidebar visibility
-- Theme preferences
-- Any UI state shared across components
-
-**Do NOT use for:**
-
-- Server data (use React Query/Convex)
-- Form data (use React Hook Form)
 
 ---
 
 ## Database Options
 
-### Convex (Serverless Real-time)
+### Drizzle + PostgreSQL
 
-**Best for:**
+**Schema with custom types (pgvector example):**
 
-- Real-time collaborative features
-- Rapid prototyping
-- Projects without existing database
-- Applications needing subscriptions
+```typescript
+// lib/schema.ts
+import { pgTable, text, timestamp, uuid, customType } from 'drizzle-orm/pg-core';
 
-**Schema definition:**
+// Custom pgvector type
+const vector = customType<{ data: number[]; driverData: string }>({
+  dataType() {
+    return 'vector(1536)';
+  },
+  toDriver(value: number[]): string {
+    return `[${value.join(',')}]`;
+  },
+  fromDriver(value: string): number[] {
+    return JSON.parse(value.replace('[', '[').replace(']', ']'));
+  },
+});
+
+export const documents = pgTable('documents', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  content: text('content').notNull(),
+  embedding: vector('embedding'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+export const users = pgTable('users', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  email: text('email').notNull().unique(),
+  name: text('name').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+```
+
+**Environment-aware client:**
+
+```typescript
+// lib/db.ts
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
+import * as schema from './schema';
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+});
+
+export const db = drizzle(pool, { schema });
+```
+
+### Convex Schema
 
 ```typescript
 // convex/schema.ts
-import { defineSchema, defineTable } from "convex/server";
-import { v } from "convex/values";
+import { defineSchema, defineTable } from 'convex/server';
+import { v } from 'convex/values';
 
 export default defineSchema({
   users: defineTable({
     email: v.string(),
     name: v.string(),
+    image: v.optional(v.string()),
+  }).index('by_email', ['email']),
+
+  projects: defineTable({
+    name: v.string(),
+    ownerId: v.id('users'),
     createdAt: v.number(),
-  }).index("by_email", ["email"]),
+  }).index('by_owner', ['ownerId']),
 
-  posts: defineTable({
-    authorId: v.id("users"),
+  tasks: defineTable({
+    projectId: v.id('projects'),
     title: v.string(),
-    content: v.string(),
-    published: v.boolean(),
-  }).index("by_author", ["authorId"]),
+    completed: v.boolean(),
+    order: v.number(),
+  })
+    .index('by_project', ['projectId'])
+    .index('by_project_order', ['projectId', 'order']),
 });
-```
-
-**Key patterns:**
-
-1. Use `v.id("table")` for foreign keys
-2. Define indexes for query patterns
-3. Use `ctx.db.query().withIndex()` for efficient queries
-4. Mutations are automatically transactional
-
-### Drizzle + PostgreSQL (Traditional)
-
-**Best for:**
-
-- Complex SQL queries
-- Existing PostgreSQL database
-- Need for raw SQL escape hatch
-- Strict relational data modeling
-
-**Schema definition:**
-
-```typescript
-// packages/database/src/schema.ts
-import { pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
-
-export const users = pgTable("users", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  email: text("email").notNull().unique(),
-  name: text("name").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-export const posts = pgTable("posts", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  authorId: uuid("author_id").references(() => users.id).notNull(),
-  title: text("title").notNull(),
-  content: text("content").notNull(),
-  published: boolean("published").default(false).notNull(),
-});
-```
-
-**Query patterns:**
-
-```typescript
-// Simple select
-const allUsers = await db.select().from(users);
-
-// With relations
-const usersWithPosts = await db.query.users.findMany({
-  with: { posts: true },
-});
-
-// Complex query
-const result = await db
-  .select()
-  .from(posts)
-  .where(and(eq(posts.published, true), gt(posts.createdAt, lastWeek)));
-```
-
-### Migration Strategy
-
-```bash
-# Drizzle migrations
-bun drizzle-kit generate  # Generate migration
-bun drizzle-kit migrate   # Apply migration
-bun drizzle-kit studio    # Visual database browser
 ```
 
 ---
 
 ## Authentication
 
-### Better Auth
-
-**Why Better Auth:**
-
-- Framework-agnostic
-- Works with Convex and Drizzle
-- Social providers out of the box
-- Type-safe API
-
-**Server setup (with Drizzle):**
+### Better Auth with Drizzle
 
 ```typescript
 // lib/auth.ts
-import { betterAuth } from "better-auth";
-import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { db } from "@/packages/database";
+import { betterAuth } from 'better-auth';
+import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { db } from './db';
 
 export const auth = betterAuth({
-  database: drizzleAdapter(db, { provider: "pg" }),
+  database: drizzleAdapter(db, { provider: 'pg' }),
   emailAndPassword: { enabled: true },
   socialProviders: {
     google: {
@@ -407,236 +798,48 @@ export const auth = betterAuth({
 });
 ```
 
-**Client setup:**
-
 ```typescript
 // lib/auth-client.ts
-import { createAuthClient } from "better-auth/react";
+import { createAuthClient } from 'better-auth/react';
 
 export const authClient = createAuthClient({
-  baseURL: process.env.NEXT_PUBLIC_APP_URL,
+  baseURL: process.env.VITE_APP_URL,
 });
 
 export const { useSession, signIn, signOut } = authClient;
 ```
 
-**Protected routes (TanStack Start):**
-
-```typescript
-// routes/dashboard.tsx
-import { createFileRoute, redirect } from "@tanstack/react-router";
-import { auth } from "@/lib/auth";
-
-export const Route = createFileRoute("/dashboard")({
-  beforeLoad: async ({ context }) => {
-    const session = await auth.api.getSession({
-      headers: context.request.headers,
-    });
-    if (!session) throw redirect({ to: "/login" });
-  },
-  component: Dashboard,
-});
-```
-
-**With Convex:**
+### Better Auth with Convex
 
 ```typescript
 // convex/auth.config.ts
-import { convexAuth } from "@convex-dev/auth/server";
-import Google from "@auth/core/providers/google";
+import { convexAuth } from '@convex-dev/auth/server';
+import Google from '@auth/core/providers/google';
 
 export const { auth, signIn, signOut, store } = convexAuth({
   providers: [Google],
 });
 ```
 
----
-
-## Testing Strategies
-
-### Test Pyramid
-
-```
-        /\
-       /  \     E2E (Playwright) - Critical user flows
-      /----\
-     /      \   Integration - API routes, database
-    /--------\
-   /          \ Unit (Vitest) - Utils, hooks, components
-  --------------
-```
-
-### Vitest (Unit & Integration)
-
-**Configuration:**
+### Protected Routes (TanStack Start)
 
 ```typescript
-// vitest.config.ts
-import { defineConfig } from "vitest/config";
+// routes/dashboard.tsx
+import { createFileRoute, redirect } from '@tanstack/react-router';
+import { auth } from '@/lib/auth';
 
-export default defineConfig({
-  test: {
-    environment: "jsdom",
-    globals: true,
-    setupFiles: ["./test/setup.ts"],
-    include: ["src/**/*.test.{ts,tsx}"],
+export const Route = createFileRoute('/dashboard')({
+  beforeLoad: async ({ context }) => {
+    const session = await auth.api.getSession({
+      headers: context.request.headers,
+    });
+    if (!session) {
+      throw redirect({ to: '/login' });
+    }
+    return { session };
   },
+  component: Dashboard,
 });
-```
-
-**Testing patterns:**
-
-```typescript
-// Component test
-import { render, screen } from "@testing-library/react";
-import { Button } from "./button";
-
-test("renders button with text", () => {
-  render(<Button>Click me</Button>);
-  expect(screen.getByRole("button", { name: /click me/i })).toBeInTheDocument();
-});
-
-// Hook test
-import { renderHook, act } from "@testing-library/react";
-import { useCounter } from "./use-counter";
-
-test("increments counter", () => {
-  const { result } = renderHook(() => useCounter());
-  act(() => result.current.increment());
-  expect(result.current.count).toBe(1);
-});
-
-// API test
-import { describe, it, expect, vi } from "vitest";
-
-describe("userService", () => {
-  it("fetches users", async () => {
-    const users = await userService.getAll();
-    expect(users).toHaveLength(3);
-  });
-});
-```
-
-### Playwright (E2E)
-
-**Configuration:**
-
-```typescript
-// playwright.config.ts
-import { defineConfig } from "@playwright/test";
-
-export default defineConfig({
-  testDir: "./e2e",
-  use: {
-    baseURL: "http://localhost:3000",
-    trace: "on-first-retry",
-  },
-  webServer: {
-    command: "bun run dev",
-    port: 3000,
-    reuseExistingServer: !process.env.CI,
-  },
-});
-```
-
-**Test patterns:**
-
-```typescript
-// e2e/auth.spec.ts
-import { test, expect } from "@playwright/test";
-
-test("user can sign in", async ({ page }) => {
-  await page.goto("/login");
-  await page.fill('[name="email"]', "test@example.com");
-  await page.fill('[name="password"]', "password123");
-  await page.click('button[type="submit"]');
-  await expect(page).toHaveURL("/dashboard");
-});
-```
-
-**Testing guidelines:**
-
-1. Test user flows, not implementation
-2. Use data-testid for stable selectors
-3. Run E2E in CI, not on every commit
-4. Keep E2E tests focused (< 20 per project)
-
----
-
-## Deployment Patterns
-
-### Web: Netlify (Recommended)
-
-**netlify.toml:**
-
-```toml
-[build]
-  command = "turbo build --filter=@project/web"
-  publish = "apps/web/.output/public"
-
-[build.environment]
-  NODE_VERSION = "22"
-
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-```
-
-**Environment variables:**
-
-- Set in Netlify dashboard under Site Settings > Environment Variables
-- Use `VITE_` prefix for client-accessible variables
-- Never commit `.env` files
-
-### Web: Vercel (Alternative)
-
-**vercel.json:**
-
-```json
-{
-  "buildCommand": "turbo build --filter=@project/web",
-  "outputDirectory": "apps/web/.output",
-  "installCommand": "bun install"
-}
-```
-
-### Mobile: EAS (Expo Application Services)
-
-**eas.json:**
-
-```json
-{
-  "cli": { "version": ">= 5.0.0" },
-  "build": {
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal"
-    },
-    "preview": {
-      "distribution": "internal"
-    },
-    "production": {}
-  },
-  "submit": {
-    "production": {}
-  }
-}
-```
-
-**Commands:**
-
-```bash
-eas build --platform ios --profile preview   # TestFlight
-eas build --platform android --profile preview  # Internal
-eas submit --platform ios  # App Store
-```
-
-### Convex Deployment
-
-```bash
-npx convex deploy  # Production deployment
-npx convex dev     # Local development with sync
 ```
 
 ---
@@ -648,191 +851,136 @@ npx convex dev     # Local development with sync
 ```
 project/
 ├── apps/
-│   ├── web/              # TanStack Start application
+│   ├── web/                    # TanStack Start
 │   │   ├── src/
-│   │   │   ├── routes/   # File-based routes
-│   │   │   ├── components/  # App-specific components
-│   │   │   ├── hooks/    # App-specific hooks
-│   │   │   └── lib/      # App utilities
+│   │   │   ├── routes/         # File-based routing
+│   │   │   ├── components/     # App components
+│   │   │   └── lib/            # Utilities, queries
 │   │   └── package.json
-│   └── mobile/           # Expo application
-│       ├── app/          # Expo Router routes
-│       ├── components/
+│   └── mobile/                 # Expo
+│       ├── app/                # Expo Router
+│       ├── src/
+│       │   ├── api/            # API client, schemas
+│       │   ├── components/
+│       │   ├── hooks/
+│       │   └── lib/            # Store, utils
 │       └── package.json
 ├── packages/
-│   ├── ui/               # Shared shadcn/ui components
-│   │   ├── src/
-│   │   │   ├── components/
-│   │   │   └── lib/
-│   │   └── package.json
-│   ├── database/         # Drizzle schema & client
-│   │   ├── src/
-│   │   │   ├── schema.ts
-│   │   │   ├── client.ts
-│   │   │   └── migrations/
-│   │   └── package.json
-│   └── auth/             # Better Auth configuration
-├── convex/               # Convex functions (if using)
-│   ├── schema.ts
-│   ├── _generated/
-│   └── *.ts
+│   ├── ui/                     # shadcn/ui components
+│   └── database/               # Drizzle schema (if using)
+├── convex/                     # Convex functions (if using)
 ├── turbo.json
 ├── biome.json
 └── package.json
 ```
 
-### Naming Conventions
+### Import Alias
 
-| Type | Convention | Example |
-|------|------------|---------|
-| Files (components) | kebab-case | `user-profile.tsx` |
-| Files (utilities) | kebab-case | `format-date.ts` |
-| React components | PascalCase | `UserProfile` |
-| Functions | camelCase | `formatDate` |
-| Constants | SCREAMING_SNAKE | `MAX_RETRIES` |
-| Types/Interfaces | PascalCase | `UserProfile` |
-| CSS classes | kebab-case | `user-profile-header` |
-
-### Import Organization
+All imports use `@/` prefix:
 
 ```typescript
-// 1. External packages
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-
-// 2. Internal packages (monorepo)
-import { Button } from "@project/ui";
-import { db } from "@project/database";
-
-// 3. Relative imports (current package)
-import { formatDate } from "@/lib/utils";
-import { UserCard } from "@/components/user-card";
-
-// 4. Types (always last)
-import type { User } from "@/types";
+import { useAppStore } from '@/lib/store';
+import { ArticleCard } from '@/components/article-card';
+import { fetchValidated } from '@/api/client';
 ```
 
-### File Colocation
+### Section Comments
 
-Keep related files together:
+Use this format for organizing large files:
 
-```
-components/
-  user-profile/
-    index.tsx           # Main component
-    user-profile.test.tsx  # Tests
-    use-user-data.ts    # Related hook
+```typescript
+// ============================================================================
+// TYPES
+// ============================================================================
+
+interface User {
+  // ...
+}
+
+// ============================================================================
+// STORE
+// ============================================================================
+
+export const useUserStore = create<UserState>()(...);
+
+// ============================================================================
+// HOOKS
+// ============================================================================
+
+export function useCurrentUser() {
+  // ...
+}
 ```
 
 ---
 
 ## UI/Accessibility Guidelines
 
-### Accessibility Checklist
+### Keyboard & Focus
 
-- [ ] All interactive elements are keyboard accessible
-- [ ] Focus states are visible
-- [ ] Color contrast meets WCAG 2.1 AA (4.5:1 for text)
-- [ ] Images have alt text
-- [ ] Form inputs have labels
-- [ ] Error messages are announced to screen readers
-- [ ] Page has proper heading hierarchy (h1 > h2 > h3)
+- Full keyboard support per WAI-ARIA APG patterns
+- Visible focus rings (`:focus-visible`)
+- Focus management in modals/dialogs
+- Never `outline: none` without replacement
 
-### Semantic HTML
+### Touch Targets
 
-```tsx
-// Good
-<button onClick={handleClick}>Submit</button>
-<a href="/about">About</a>
+- Minimum 44x44px on mobile
+- `touch-action: manipulation` to prevent double-tap zoom
+- Input font-size >= 16px to prevent iOS zoom
 
-// Bad
-<div onClick={handleClick}>Submit</div>
-<span onClick={() => navigate("/about")}>About</span>
-```
+### Forms
 
-### Focus Management
+- Keep submit enabled until request starts
+- Show spinner with original label during loading
+- Inline errors next to fields
+- Focus first error on submit
+- Warn on unsaved changes before navigation
 
-```tsx
-// Dialog focus trap (shadcn/ui handles this)
-<Dialog>
-  <DialogTrigger asChild>
-    <Button>Open</Button>
-  </DialogTrigger>
-  <DialogContent>
-    {/* Focus is trapped here */}
-  </DialogContent>
-</Dialog>
-```
+### Performance
 
-### Aria Labels
-
-```tsx
-// Icon-only buttons need labels
-<Button variant="ghost" size="icon" aria-label="Close menu">
-  <X className="size-4" />
-</Button>
-
-// Loading states
-<Button disabled aria-busy={isLoading}>
-  {isLoading ? <Spinner /> : "Submit"}
-</Button>
-```
-
-### Responsive Design
-
-```tsx
-// Mobile-first approach
-<div className="flex flex-col md:flex-row gap-4">
-  <aside className="w-full md:w-64">Sidebar</aside>
-  <main className="flex-1">Content</main>
-</div>
-
-// Touch targets (min 44x44px)
-<Button className="min-h-11 min-w-11">Tap me</Button>
-```
+- Virtualize lists > 50 items (FlashList for RN)
+- Preload above-fold images, lazy-load rest
+- Profile with CPU/network throttling
+- Mutations target < 500ms
 
 ### Dark Mode
 
 ```typescript
-// Theme toggle with system preference
-const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
+// Set color-scheme on html element
+document.documentElement.style.colorScheme = theme;
 
-useEffect(() => {
-  const root = document.documentElement;
-  if (theme === "system") {
-    const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
-      ? "dark"
-      : "light";
-    root.classList.toggle("dark", systemTheme === "dark");
-  } else {
-    root.classList.toggle("dark", theme === "dark");
-  }
-}, [theme]);
+// Use CSS variables for theming
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.1 0 0);
+}
+
+.dark {
+  --background: oklch(0.1 0 0);
+  --foreground: oklch(0.95 0 0);
+}
 ```
 
 ---
 
 ## Quick Reference
 
-### Common Commands
+### Commands
 
 ```bash
 # Development
 bun dev                    # Start all apps
 bun dev --filter=web       # Start web only
+bun dev --filter=mobile    # Start mobile only
 
 # Building
 bun build                  # Build all
 turbo build --filter=web   # Build specific
 
-# Testing
-bun test                   # Run tests
-bun test:e2e               # Run E2E
-
 # Code quality
 bun lint                   # Lint all
-bun format                 # Format all
-bun check                  # Lint + format
+bun check                  # Lint + format with auto-fix
 
 # Database (Drizzle)
 bun db:generate            # Generate migration
@@ -842,29 +990,28 @@ bun db:studio              # Open Drizzle Studio
 # Convex
 npx convex dev             # Start Convex dev
 npx convex deploy          # Deploy to production
+
+# Mobile
+bun ios                    # Run on iOS simulator
+bun android                # Run on Android emulator
+eas build --platform ios   # Build for TestFlight
 ```
 
-### Environment Variables
+### Key Dependencies
 
-```bash
-# .env.local (never commit)
-DATABASE_URL=postgresql://...
-CONVEX_DEPLOYMENT=...
-
-# Client-accessible (prefix with VITE_)
-VITE_APP_URL=http://localhost:3000
-```
-
-### Recommended VS Code Extensions
-
-- Biome (biomejs.biome)
-- Tailwind CSS IntelliSense
-- Pretty TypeScript Errors
-- Error Lens
-- GitLens
+| Category | Web | Mobile |
+|----------|-----|--------|
+| Framework | TanStack Start | Expo SDK 54 |
+| Routing | TanStack Router | Expo Router |
+| State | TanStack Query | Zustand + TanStack Query |
+| Forms | Plain useState | Plain useState |
+| Tables | TanStack Table | - |
+| Lists | - | FlashList |
+| Auth | Better Auth | Better Auth |
+| Styling | Tailwind + shadcn | React Native StyleSheet |
 
 ---
 
 ## Changelog
 
-- **v0.1.0** - Initial documentation based on patterns from meinungsmache-app, picalyze, qwer-digest, unicasto
+- **v0.1.0** - Initial documentation based on actual patterns from meinungsmache-app, picalyze, qwer-digest, unicasto, hub, mobile-feat-dashboard-v1

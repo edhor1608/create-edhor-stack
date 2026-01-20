@@ -1,0 +1,33 @@
+{
+  "$schema": "https://claude.ai/schemas/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(bun *)",
+      "Bash(turbo *)",
+      "Bash(git status)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git branch*)",
+      "Bash(git checkout*)",
+      "Bash(git switch*)",
+      "Bash(npx expo*)",
+      "Bash(eas *)"
+    ],
+    "deny": [
+      "Bash(rm -rf /)",
+      "Bash(git push --force)",
+      "Bash(git reset --hard)"
+    ]
+  },
+  "instructions": [
+    "Always use Biome for linting: `bun check` not eslint",
+    "Use @/ import alias for src/ paths",
+    "Follow existing patterns in the codebase",
+    "Write tests before implementation (TDD)",
+    "Use Zustand selectors, never destructure entire store",
+    "Validate all API responses with Zod schemas",
+    "Keep commits small and focused"
+  ]
+}

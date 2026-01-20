@@ -1,0 +1,139 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+{{name}} is a Bun + Turborepo monorepo scaffolded with [create-edhor-stack](https://github.com/your-username/create-edhor-stack).
+
+## Commands
+
+```bash
+# Root (monorepo)
+bun dev              # Start all apps in development
+bun build            # Build all apps and packages
+bun lint             # Lint with Biome
+bun check            # Lint + format with auto-fix
+bun clean            # Clean all build artifacts
+
+# Filter to specific app
+bun dev --filter=web     # Start web app only
+bun dev --filter=mobile  # Start mobile app only
+```
+
+## Architecture
+
+### Monorepo Structure
+
+```
+{{name}}/
+├── apps/
+│   ├── web/              # TanStack Start web application
+│   │   ├── src/
+│   │   │   ├── routes/   # File-based routing
+│   │   │   └── lib/      # Utilities, query client
+│   │   └── package.json
+│   └── mobile/           # Expo React Native application
+│       ├── app/          # Expo Router screens
+│       ├── src/
+│       │   ├── api/      # API client, schemas, queries
+│       │   ├── lib/      # Store, utils, query client
+│       │   └── hooks/    # Custom React hooks
+│       └── package.json
+├── packages/
+│   └── ui/               # Shared UI components (shadcn/ui)
+├── turbo.json            # Turborepo configuration
+├── biome.json            # Linting & formatting rules
+└── package.json          # Root workspace configuration
+```
+
+### Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Package Manager | Bun |
+| Monorepo | Turborepo |
+| Web Framework | TanStack Start |
+| Mobile Framework | Expo SDK 54 + Expo Router |
+| State (Server) | TanStack Query |
+| State (Client) | Zustand (mobile) |
+| Validation | Zod |
+| Styling | Tailwind CSS v4, shadcn/ui |
+| Icons | Lucide |
+| Linting | Biome |
+
+### Key Patterns
+
+**State Management (Mobile)**:
+- Multiple specialized Zustand stores with `persist()` middleware
+- Use selectors to prevent re-renders: `useAppStore(state => state.theme)`
+- Never destructure the whole store
+
+**API Layer**:
+- `fetchValidated()` wraps fetch with Zod schema validation
+- Query options factories for React Query consistency
+- Offline-first configuration with 7-day cache
+
+**Routing**:
+- Web: TanStack Router file-based routing in `src/routes/`
+- Mobile: Expo Router file-based routing in `app/`
+
+### Import Alias
+
+All imports use `@/` prefix mapping to `src/`:
+
+```typescript
+import { useAppStore } from '@/lib/store';
+import { fetchValidated } from '@/api/client';
+```
+
+## Code Style
+
+Enforced by Biome (`biome.json`):
+- 2-space indentation, 100-char line width
+- Single quotes, ES5 trailing commas, semicolons
+- `useImportType` for type-only imports
+- No unused imports (error), no unused variables (warn)
+
+Section comments format:
+```typescript
+// ============================================================================
+// SECTION NAME
+// ============================================================================
+```
+
+## Development Guidelines
+
+### Adding a New Route (Web)
+
+1. Create file in `apps/web/src/routes/` (e.g., `dashboard.tsx`)
+2. Export Route with `createFileRoute`
+3. Use route loaders for data fetching
+
+### Adding a New Screen (Mobile)
+
+1. Create file in `apps/mobile/app/` (e.g., `settings.tsx`)
+2. Use `useLocalSearchParams` for dynamic routes
+3. Connect to Zustand stores via selectors
+
+### Adding API Endpoints
+
+1. Define Zod schema in `src/api/schemas.ts`
+2. Create query options in `src/api/queries.ts`
+3. Use `fetchValidated()` for type-safe fetching
+
+## AI Agent Instructions
+
+See [AGENTS.md](./AGENTS.md) for multi-agent workflow documentation.
+
+### Preferred Approaches
+
+- **TDD**: Write failing tests first, then implement
+- **Small commits**: Commit after each logical change
+- **DRY/YAGNI**: Don't over-engineer, build what's needed
+
+### Before Making Changes
+
+1. Read relevant files to understand context
+2. Check existing patterns in similar files
+3. Run `bun check` before committing

@@ -87,8 +87,9 @@ async function copyTemplate(
     } else {
       let content = await fs.readFile(srcPath, "utf-8");
 
-      // Render handlebars-style variables
-      if (entry.name.endsWith(".hbs") || entry.name.endsWith(".json") || entry.name.endsWith(".tsx")) {
+      // Render handlebars-style variables in template files
+      const renderExtensions = [".hbs", ".json", ".tsx", ".ts", ".md"];
+      if (renderExtensions.some((ext) => entry.name.endsWith(ext))) {
         content = renderTemplate(content, vars);
       }
 
