@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.example.com';
+import { env } from '@/lib/env';
 
 /**
  * Fetch with Zod validation - validates API responses at runtime.
@@ -16,7 +16,7 @@ export async function fetchValidated<T>(
   schema: z.ZodType<T>,
   options?: RequestInit
 ): Promise<T> {
-  const url = path.startsWith('http') ? path : `${API_BASE_URL}${path}`;
+  const url = path.startsWith('http') ? path : `${env.EXPO_PUBLIC_API_URL}${path}`;
 
   const response = await fetch(url, {
     ...options,

@@ -7,13 +7,14 @@
 ## Table of Contents
 
 1. [Core Stack](#core-stack)
-2. [Expo Mobile Patterns](#expo-mobile-patterns)
-3. [TanStack Start Web Patterns](#tanstack-start-web-patterns)
-4. [Styling Patterns](#styling-patterns)
-5. [Database Options](#database-options)
-6. [Authentication](#authentication)
-7. [Code Organization](#code-organization)
-8. [UI/Accessibility Guidelines](#uiaccessibility-guidelines)
+2. [Environment Variables](#environment-variables)
+3. [Expo Mobile Patterns](#expo-mobile-patterns)
+4. [TanStack Start Web Patterns](#tanstack-start-web-patterns)
+5. [Styling Patterns](#styling-patterns)
+6. [Database Options](#database-options)
+7. [Authentication](#authentication)
+8. [Code Organization](#code-organization)
+9. [UI/Accessibility Guidelines](#uiaccessibility-guidelines)
 
 ---
 
@@ -29,6 +30,7 @@
 | Biome | Linting & formatting (replaces ESLint/Prettier) | 2.3+ |
 | Husky | Git hooks | 9.1+ |
 | TanStack Query | Server state management | 5.x |
+| t3-env | Type-safe environment variables | 0.12+ |
 
 ### Biome Configuration
 
@@ -60,6 +62,91 @@
   }
 }
 ```
+
+---
+
+## Environment Variables
+
+Use [t3-env](https://env.t3.gg/) for type-safe environment variables with Zod validation.
+
+### Web (TanStack Start)
+
+```typescript
+// src/lib/env.ts
+import { createEnv } from '@t3-oss/env-core';
+import { z } from 'zod';
+
+export const env = createEnv({
+  server: {
+    DATABASE_URL: z.string().url(),
+    API_SECRET: z.string().min(32),
+  },
+  clientPrefix: 'VITE_',
+  client: {
+    VITE_APP_URL: z.string().url(),
+    VITE_PUBLIC_API_URL: z.string().url(),
+  },
+  runtimeEnv: {
+    DATABASE_URL: process.env.DATABASE_URL,
+    API_SECRET: process.env.API_SECRET,
+    VITE_APP_URL: process.env.VITE_APP_URL,
+    VITE_PUBLIC_API_URL: process.env.VITE_PUBLIC_API_URL,
+  },
+  emptyStringAsUndefined: true,
+});
+```
+
+### Mobile (Expo)
+
+```typescript
+// src/lib/env.ts
+import { createEnv } from '@t3-oss/env-core';
+import { z } from 'zod';
+
+export const env = createEnv({
+  clientPrefix: 'EXPO_PUBLIC_',
+  client: {
+    EXPO_PUBLIC_API_URL: z.string().url(),
+    EXPO_PUBLIC_SENTRY_DSN: z.string().url().optional(),
+  },
+  runtimeEnv: {
+    EXPO_PUBLIC_API_URL: process.env.EXPO_PUBLIC_API_URL,
+    EXPO_PUBLIC_SENTRY_DSN: process.env.EXPO_PUBLIC_SENTRY_DSN,
+  },
+  emptyStringAsUndefined: true,
+});
+```
+
+### Usage
+
+```typescript
+// Always import from env.ts, never use process.env directly
+import { env } from '@/lib/env';
+
+// Type-safe access with autocomplete
+const apiUrl = env.EXPO_PUBLIC_API_URL;
+
+// Server variables throw if accessed on client
+const secret = env.API_SECRET; // Error on client!
+```
+
+### .env Files
+
+```bash
+# .env.local (never commit)
+DATABASE_URL=postgresql://...
+API_SECRET=your-secret-key
+
+# Client variables (prefixed)
+VITE_APP_URL=http://localhost:3000    # Web
+EXPO_PUBLIC_API_URL=https://api.com   # Mobile
+```
+
+**Key rules:**
+- Never use `process.env` directly - always use `env` object
+- Server variables throw if accessed on client
+- Client variables must be prefixed (`VITE_` or `EXPO_PUBLIC_`)
+- All variables must be in `runtimeEnv` for bundler compatibility
 
 ---
 
