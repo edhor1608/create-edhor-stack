@@ -1,5 +1,7 @@
 # create-edhor-stack
 
+⚠️ Not published yet ⚠️
+
 Scaffold opinionated Bun + Turborepo projects with interactive prompts.
 
 ## Usage
