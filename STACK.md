@@ -647,72 +647,6 @@ export function DataTable<T>({ data, columns }: DataTableProps<T>) {
 }
 ```
 
-### Forms: Plain useState
-
-**No form libraries - just controlled inputs:**
-
-```typescript
-function CreateProjectForm({ onSuccess }: { onSuccess: () => void }) {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const validate = () => {
-    const newErrors: Record<string, string> = {};
-    if (!name.trim()) newErrors.name = 'Name is required';
-    if (name.length < 3) newErrors.name = 'Name must be at least 3 characters';
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!validate()) return;
-
-    setIsSubmitting(true);
-    try {
-      await createProject({ name: name.trim(), description: description.trim() });
-      onSuccess();
-    } catch (error) {
-      setErrors({ form: 'Failed to create project' });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit}>
-      <div>
-        <label htmlFor="name">Name</label>
-        <input
-          id="name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          aria-invalid={!!errors.name}
-        />
-        {errors.name && <span className="text-red-500">{errors.name}</span>}
-      </div>
-
-      <div>
-        <label htmlFor="description">Description</label>
-        <textarea
-          id="description"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-      </div>
-
-      {errors.form && <div className="text-red-500">{errors.form}</div>}
-
-      <button type="submit" disabled={isSubmitting}>
-        {isSubmitting ? 'Creating...' : 'Create Project'}
-      </button>
-    </form>
-  );
-}
-```
-
 ### Server Functions
 
 ```typescript
@@ -1098,7 +1032,3 @@ eas build --platform ios   # Build for TestFlight
 | Styling | Tailwind + shadcn | React Native StyleSheet |
 
 ---
-
-## Changelog
-
-- **v0.1.0** - Initial documentation based on actual patterns from meinungsmache-app, picalyze, qwer-digest, unicasto, hub, mobile-feat-dashboard-v1
