@@ -28,55 +28,43 @@ export async function runPrompts(projectName?: string): Promise<ProjectConfig | 
           required: true,
         }),
 
-      backend: () =>
+      database: () =>
         p.select({
-          message: "Backend setup?",
+          message: "Database?",
           options: [
             { value: "none", label: "None", hint: "external API" },
-            { value: "convex", label: "Convex", hint: "real-time serverless" },
-            { value: "drizzle", label: "Drizzle + PostgreSQL", hint: "traditional" },
+            { value: "postgres", label: "PostgreSQL", hint: "Drizzle ORM" },
+            { value: "convex", label: "Convex", hint: "realtime DB + serverless functions" },
           ],
           initialValue: "none",
         }),
+
+      api: ({ results }) =>
+        results.database !== "convex"
+          ? p.select({
+              message: "API framework?",
+              options: [
+                { value: "none", label: "None", hint: "TanStack Start server functions" },
+                { value: "hono", label: "Hono", hint: "lightweight, fast" },
+                { value: "elysia", label: "Elysia", hint: "Bun-native, end-to-end type safety" },
+              ],
+              initialValue: "none",
+            })
+          : Promise.resolve("none"),
 
       packages: ({ results }) =>
         p.multiselect({
           message: "Additional packages?",
           options: [
             { value: "ui", label: "UI (shadcn/ui + Tailwind)", hint: "recommended" },
-            ...(results.backend === "drizzle"
-              ? [{ value: "auth", label: "Auth (Better Auth)" }]
+            { value: "shared", label: "Shared (types + schemas)", hint: "for web & mobile" },
+            ...(results.database !== "none"
+              ? [{ value: "auth", label: "Auth", hint: results.database === "convex" ? "Convex Auth" : "Better Auth" }]
               : []),
+            { value: "stripe", label: "Stripe", hint: "payments" },
           ],
           required: false,
         }),
-
-      uiStyle: ({ results }) =>
-        (results.packages as string[] | undefined)?.includes("ui")
-          ? p.select({
-              message: "UI style?",
-              options: [
-                { value: "new-york", label: "New York", hint: "recommended" },
-                { value: "default", label: "Default" },
-              ],
-              initialValue: "new-york",
-            })
-          : Promise.resolve(undefined),
-
-      uiBaseColor: ({ results }) =>
-        (results.packages as string[] | undefined)?.includes("ui")
-          ? p.select({
-              message: "Base color?",
-              options: [
-                { value: "zinc", label: "Zinc", hint: "neutral" },
-                { value: "slate", label: "Slate", hint: "cool" },
-                { value: "stone", label: "Stone", hint: "warm" },
-                { value: "neutral", label: "Neutral" },
-                { value: "gray", label: "Gray" },
-              ],
-              initialValue: "zinc",
-            })
-          : Promise.resolve(undefined),
 
       testing: () =>
         p.confirm({
@@ -87,6 +75,12 @@ export async function runPrompts(projectName?: string): Promise<ProjectConfig | 
       ci: () =>
         p.confirm({
           message: "Add GitHub Actions CI?",
+          initialValue: true,
+        }),
+
+      deployment: () =>
+        p.confirm({
+          message: "Add deployment config? (Dockerfile + fly.toml)",
           initialValue: true,
         }),
     },

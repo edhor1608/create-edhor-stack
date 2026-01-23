@@ -29,6 +29,16 @@ export async function scaffoldProject(config: ProjectConfig, targetDir: string):
     }
   }
 
+  // Copy API framework template if selected
+  if (config.api && config.api !== "none") {
+    const apiSrc = path.join(templatesDir, "apps", `api-${config.api}`);
+    const apiDest = path.join(targetDir, "apps", "api");
+
+    if (await fs.pathExists(apiSrc)) {
+      await copyTemplate(apiSrc, apiDest, { name: config.name });
+    }
+  }
+
   // Copy selected packages
   for (const pkg of config.packages) {
     const pkgSrc = path.join(templatesDir, "packages", pkg);
@@ -39,22 +49,10 @@ export async function scaffoldProject(config: ProjectConfig, targetDir: string):
     }
   }
 
-  // Initialize shadcn for UI package
-  if (config.packages.includes("ui") && config.uiStyle && config.uiBaseColor) {
-    const uiPath = path.join(targetDir, "packages", "ui");
-    try {
-      await execa("bunx", [
-        "shadcn@latest", "init",
-        "--style", config.uiStyle,
-        "--base-color", config.uiBaseColor,
-        "--yes",
-        "--cwd", uiPath
-      ], { stdio: "inherit" });
-    } catch (error) {
-      console.warn("\nWarning: Failed to initialize shadcn. You can run it manually:");
-      console.warn(`  cd ${path.relative(process.cwd(), uiPath)}`);
-      console.warn(`  bunx shadcn@latest init --style ${config.uiStyle} --base-color ${config.uiBaseColor}\n`);
-    }
+  // Remove deployment files if not enabled
+  if (!config.deployment) {
+    await fs.remove(path.join(targetDir, "Dockerfile"));
+    await fs.remove(path.join(targetDir, "fly.toml"));
   }
 
   // Make husky pre-commit executable
@@ -88,7 +86,7 @@ async function copyTemplate(
       let content = await fs.readFile(srcPath, "utf-8");
 
       // Render handlebars-style variables in template files
-      const renderExtensions = [".hbs", ".json", ".tsx", ".ts", ".md"];
+      const renderExtensions = [".hbs", ".json", ".tsx", ".ts", ".md", ".toml"];
       if (renderExtensions.some((ext) => entry.name.endsWith(ext))) {
         content = renderTemplate(content, vars);
       }

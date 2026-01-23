@@ -464,6 +464,58 @@ export default function ArticleScreen() {
 
 ## TanStack Start Web Patterns
 
+> **Note**: TanStack Start uses Vite 6+ as its build tool. Configuration lives in `vite.config.ts` using the `@tanstack/react-start/plugin/vite` plugin.
+
+### Vite Configuration
+
+```typescript
+// vite.config.ts
+import { tanstackStart } from '@tanstack/react-start/plugin/vite';
+import tailwindcss from '@tailwindcss/vite';
+import viteReact from '@vitejs/plugin-react';
+import { defineConfig } from 'vite';
+import tsConfigPaths from 'vite-tsconfig-paths';
+
+export default defineConfig({
+  server: {
+    port: 3000,
+  },
+  plugins: [
+    tailwindcss(),
+    tsConfigPaths({
+      projects: ['./tsconfig.json'],
+    }),
+    tanstackStart({
+      srcDirectory: 'src',
+    }),
+    viteReact(),
+  ],
+});
+```
+
+### Router Configuration
+
+```typescript
+// src/router.tsx
+import { createRouter } from '@tanstack/react-router';
+import { routeTree } from './routeTree.gen';
+
+export function getRouter() {
+  const router = createRouter({
+    routeTree,
+    defaultPreload: 'intent',
+    scrollRestoration: true,
+  });
+  return router;
+}
+
+declare module '@tanstack/react-router' {
+  interface Register {
+    router: ReturnType<typeof getRouter>;
+  }
+}
+```
+
 ### Data Fetching: TanStack Query
 
 **Query options factories for consistency:**
