@@ -150,3 +150,14 @@ See [STACK.md](./STACK.md) for opinionated best practices on:
 ## License
 
 MIT
+
+<!-- status:start -->
+## Status
+- State: active
+- Summary: Define current milestone.
+- Next: Define next concrete step.
+- Updated: 2026-02-21
+- Branch: `main`
+- Working Tree: dirty (2 files)
+- Last Commit: a2185ad (2026-01-25) feat: add GitHub Actions workflow for automated release process
+<!-- status:end -->
