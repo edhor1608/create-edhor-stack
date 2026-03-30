@@ -15,6 +15,9 @@
     "typecheck": {
       "dependsOn": ["^build"]
     },
+    "typecheck:tsc": {
+      "dependsOn": ["^build"]
+    },
     "clean": {
       "cache": false
     }

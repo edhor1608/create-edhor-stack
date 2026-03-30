@@ -8,6 +8,10 @@
     "./types": "./src/types.ts",
     "./utils": "./src/utils.ts"
   },
+  "scripts": {
+    "typecheck": "tsgo --noEmit -p tsconfig.json",
+    "typecheck:tsc": "tsc --noEmit -p tsconfig.json"
+  },
   "dependencies": {
     "zod": "^3.24.0"
   },
