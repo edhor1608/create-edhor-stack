@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import * as p from "@clack/prompts";
 import pc from "picocolors";
+import { access, rm } from "node:fs/promises";
 import path from "node:path";
-import fs from "fs-extra";
 import { runPrompts } from "./prompts.js";
 import { scaffoldProject } from "./scaffold.js";
 
@@ -15,8 +15,7 @@ async function main() {
 
   const targetDir = path.resolve(process.cwd(), config.name);
 
-  // Check if directory exists
-  if (await fs.pathExists(targetDir)) {
+  if (await pathExists(targetDir)) {
     const overwrite = await p.confirm({
       message: `Directory ${pc.cyan(config.name)} already exists. Overwrite?`,
       initialValue: false,
@@ -27,7 +26,7 @@ async function main() {
       return;
     }
 
-    await fs.remove(targetDir);
+    await rm(targetDir, { force: true, recursive: true });
   }
 
   const s = p.spinner();
@@ -52,6 +51,15 @@ async function main() {
     s.stop("Failed to create project");
     p.log.error(String(error));
     process.exit(1);
+  }
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await access(targetPath);
+    return true;
+  } catch {
+    return false;
   }
 }
 
