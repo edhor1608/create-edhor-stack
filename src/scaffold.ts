@@ -1,14 +1,12 @@
-import fs from "fs-extra";
+import { access, chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { execa } from "execa";
 import type { ProjectConfig } from "./types.js";
 import { getTemplatesDir, renderTemplate } from "./utils.js";
 
 export async function scaffoldProject(config: ProjectConfig, targetDir: string): Promise<void> {
   const templatesDir = getTemplatesDir();
 
-  // Create target directory
-  await fs.ensureDir(targetDir);
+  await mkdir(targetDir, { recursive: true });
 
   // Copy base template
   await copyTemplate(path.join(templatesDir, "base"), targetDir, {
@@ -16,15 +14,15 @@ export async function scaffoldProject(config: ProjectConfig, targetDir: string):
   });
 
   // Create apps and packages directories
-  await fs.ensureDir(path.join(targetDir, "apps"));
-  await fs.ensureDir(path.join(targetDir, "packages"));
+  await mkdir(path.join(targetDir, "apps"), { recursive: true });
+  await mkdir(path.join(targetDir, "packages"), { recursive: true });
 
   // Copy selected apps
   for (const app of config.apps) {
     const appSrc = path.join(templatesDir, "apps", app);
     const appDest = path.join(targetDir, "apps", app);
 
-    if (await fs.pathExists(appSrc)) {
+    if (await pathExists(appSrc)) {
       await copyTemplate(appSrc, appDest, { name: config.name });
     }
   }
@@ -34,7 +32,7 @@ export async function scaffoldProject(config: ProjectConfig, targetDir: string):
     const apiSrc = path.join(templatesDir, "apps", `api-${config.api}`);
     const apiDest = path.join(targetDir, "apps", "api");
 
-    if (await fs.pathExists(apiSrc)) {
+    if (await pathExists(apiSrc)) {
       await copyTemplate(apiSrc, apiDest, { name: config.name });
     }
   }
@@ -44,21 +42,22 @@ export async function scaffoldProject(config: ProjectConfig, targetDir: string):
     const pkgSrc = path.join(templatesDir, "packages", pkg);
     const pkgDest = path.join(targetDir, "packages", pkg);
 
-    if (await fs.pathExists(pkgSrc)) {
+    if (await pathExists(pkgSrc)) {
       await copyTemplate(pkgSrc, pkgDest, { name: config.name });
     }
   }
 
   // Remove deployment files if not enabled
   if (!config.deployment) {
-    await fs.remove(path.join(targetDir, "Dockerfile"));
-    await fs.remove(path.join(targetDir, "fly.toml"));
+    await rm(path.join(targetDir, "Dockerfile"), { force: true, recursive: true });
+    await rm(path.join(targetDir, "fly.toml"), { force: true, recursive: true });
+    await rm(path.join(targetDir, ".dockerignore"), { force: true, recursive: true });
   }
 
   // Make husky pre-commit executable
   const preCommitPath = path.join(targetDir, ".husky", "pre-commit");
-  if (await fs.pathExists(preCommitPath)) {
-    await fs.chmod(preCommitPath, 0o755);
+  if (await pathExists(preCommitPath)) {
+    await chmod(preCommitPath, 0o755);
   }
 }
 
@@ -67,23 +66,24 @@ async function copyTemplate(
   destDir: string,
   vars: Record<string, string>
 ): Promise<void> {
-  await fs.ensureDir(destDir);
-  const entries = await fs.readdir(srcDir, { withFileTypes: true });
+  await mkdir(destDir, { recursive: true });
+  const entries = await readdir(srcDir, { withFileTypes: true });
 
   for (const entry of entries) {
     const srcPath = path.join(srcDir, entry.name);
     let destName = entry.name.replace(/\.hbs$/, "");
-    // Rename gitignore to .gitignore (npm excludes .gitignore files from packages)
     if (destName === "gitignore") {
       destName = ".gitignore";
+    } else if (destName === "dockerignore") {
+      destName = ".dockerignore";
     }
     const destPath = path.join(destDir, destName);
 
     if (entry.isDirectory()) {
-      await fs.ensureDir(destPath);
+      await mkdir(destPath, { recursive: true });
       await copyTemplate(srcPath, destPath, vars);
     } else {
-      let content = await fs.readFile(srcPath, "utf-8");
+      let content = await readFile(srcPath, "utf-8");
 
       // Render handlebars-style variables in template files
       const renderExtensions = [".hbs", ".json", ".tsx", ".ts", ".md", ".toml"];
@@ -91,7 +91,16 @@ async function copyTemplate(
         content = renderTemplate(content, vars);
       }
 
-      await fs.writeFile(destPath, content);
+      await writeFile(destPath, content);
     }
+  }
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await access(targetPath);
+    return true;
+  } catch {
+    return false;
   }
 }
