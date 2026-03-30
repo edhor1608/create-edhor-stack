@@ -37,7 +37,7 @@ This keeps the change aligned with the purpose of the repo. The CLI becomes nati
 
 - the repo can be verified directly
 - generated projects will expose native typecheck commands without additional manual setup
-- template runtime compatibility is still validated later when a real generated project uses the updated templates
+- template runtime compatibility is still validated later when a real generated project uses the updated templates; TODO tracking: issue `#TBD` before merge, owner `@edhor1608`, target date `2026-04-06`
 
 ## ADR-2026-03-30-explicit-node-types-for-native-cli-check
 
