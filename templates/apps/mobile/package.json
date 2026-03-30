@@ -7,7 +7,9 @@
     "dev": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "build": "eas build"
+    "build": "eas build",
+    "typecheck": "tsgo --noEmit -p tsconfig.json",
+    "typecheck:tsc": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "expo": "~54.0.0",

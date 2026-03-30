@@ -14,6 +14,8 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target node",
+    "typecheck": "tsgo --noEmit -p tsconfig.json",
+    "typecheck:tsc": "tsc --noEmit -p tsconfig.json",
     "prepublishOnly": "bun run build"
   },
   "keywords": [
@@ -35,6 +37,7 @@
     "picocolors": "^1.1.1"
   },
   "devDependencies": {
+    "@typescript/native-preview": "7.0.0-dev.20260321.1",
     "@types/node": "^22.15.21",
     "typescript": "^5.8.3"
   }

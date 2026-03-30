@@ -8,6 +8,10 @@
     "./webhooks": "./src/webhooks.ts",
     "./schemas": "./src/schemas.ts"
   },
+  "scripts": {
+    "typecheck": "tsgo --noEmit -p tsconfig.json",
+    "typecheck:tsc": "tsc --noEmit -p tsconfig.json"
+  },
   "dependencies": {
     "stripe": "^17.0.0",
     "zod": "^3.24.0"
